@@ -102,21 +102,6 @@ def build_vocab(corpus):
     return vocab
 
 
-def iter_window(iterable, n):
-    """
-    Iterate with a sliding window of `n` items to each side over the
-    given iterable.
-
-    Yields tuples of the form `(items_to_left, center, items_to_right)`.
-    """
-
-    i_len = len(iterable)
-    for i, item in enumerate(iterable):
-        yield (iterable[max(0, i - n) : i],
-               item,
-               iterable[i + 1 : min(i_len, i + n)])
-
-
 def build_cooccur(vocab, corpus, window_size=10):
     """
     Build a word co-occurrence matrix for the given corpus.
