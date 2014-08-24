@@ -121,17 +121,14 @@ def build_cooccur(vocab, corpus, window_size=10):
             logger.info("Building cooccurrence matrix: on line %i", i)
 
         tokens = line.strip().split()
+        token_ids = [word_ids[word] for word in tokens]
 
-        for center_i, center in enumerate(tokens):
-            center_id = word_ids[center]
+        for center_i, center_id in enumerate(token_ids):
+            # Collect all word IDs in left window of center word
+            context_ids = token_ids[max(0, center_i - window_size) : center_i]
+            contexts_len = len(context_ids)
 
-            # Collect all words in left window of center word
-            contexts = tokens[max(0, center_i - window_size) : center_i]
-            contexts_len = len(contexts)
-
-            for left_i, left in enumerate(contexts):
-                left_id = word_ids[left]
-
+            for left_i, left_id in enumerate(context_ids):
                 # Distance from center word
                 distance = contexts_len - left_i
 
