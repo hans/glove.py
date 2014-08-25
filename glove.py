@@ -7,7 +7,7 @@ import logging
 from math import log
 import os.path
 import pickle
-from random import sample
+from random import shuffle
 
 import numpy as np
 from scipy import sparse
@@ -143,7 +143,7 @@ def build_cooccur(vocab, corpus, window_size=10):
     return word_ids, cooccurrences
 
 
-def run_iter(word_ids, cooccurrences, W, biases, gradient_squared,
+def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
              gradient_squared_biases,
              learning_rate=0.05, x_max=100, alpha=0.75):
     """
@@ -151,8 +151,15 @@ def run_iter(word_ids, cooccurrences, W, biases, gradient_squared,
     cooccurrence data and the previously computed weight vectors /
     biases and accompanying gradient histories.
 
-    `word_ids` and `cooccurrences` should be provided as returned by
-    `build_cooccur`.
+    `word_ids` should be provided as returned by `build_cooccur`.
+
+    `cooccurrence_list` is a list where each element is of the form
+
+        (word_i_id, word_j_id, x_ij)
+
+    where `x_ij` is a cooccurrence value $X_{ij}$ as presented in the
+    matrix defined by `build_cooccur` and the Pennington et al. (2014)
+    paper itself.
 
     See the `train_glove` function for information on the shapes of `W`,
     `biases`, `gradient_squared`, `gradient_squared_biases` and how they
@@ -173,18 +180,9 @@ def run_iter(word_ids, cooccurrences, W, biases, gradient_squared,
     # We want to iterate over co-occurrence pairs randomly so as not to
     # unintentionally bias the word vector contents. We'll simply work
     # on the shuffled Cartesian product of the word IDs.
-    ids = word_ids.values()
-    paired_ids = itertools.product(sample(ids, vocab_size),
-                                   sample(ids, vocab_size))
+    shuffle(cooccurrence_list)
 
-    for main_word_id, context_word_id in paired_ids:
-        cooccurrence = cooccurrences[main_word_id, context_word_id]
-
-        # TODO is this correct? C code seems to ignore the case where we
-        # don't have any cooccurrence data
-        if cooccurrence == 0:
-            continue
-
+    for main_word_id, context_word_id, cooccurrence in cooccurrence_list:
         # Shift context word ID so that we fetch a different vector when
         # we examine a given word as main and that same word as context
         context_word_shifted = context_word_id + vocab_size
@@ -243,11 +241,20 @@ def run_iter(word_ids, cooccurrences, W, biases, gradient_squared,
     return global_cost, W, biases, gradient_squared, gradient_squared_biases
 
 
-def train_glove(word_ids, cooccurrences, vector_size=100, iterations=25,
+def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
                 **kwargs):
     """
-    Train GloVe vectors on the given cooccurrence data. Keyword
-    arguments are passed on to the iteration step function `run_iter`.
+    Train GloVe vectors on the given `cooccurrence_list`, where each
+    element is of the form
+
+        (word_i_id, word_j_id, x_ij)
+
+    where `x_ij` is a cooccurrence value $X_{ij}$ as presented in the
+    matrix defined by `build_cooccur` and the Pennington et al. (2014)
+    paper itself.
+
+    Keyword arguments are passed on to the iteration step function
+    `run_iter`.
 
     Returns the computed word vector matrix `W`.
     """
@@ -287,7 +294,7 @@ def train_glove(word_ids, cooccurrences, vector_size=100, iterations=25,
         logger.info("\tBeginning iteration %i..", i)
 
         cost, W, biases, gradient_squared, gradient_squared_biases = (
-            run_iter(word_ids, cooccurrences, W, biases, gradient_squared,
+            run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
                      gradient_squared_biases))
 
         logger.info("\t\tDone (cost %f)", cost)
@@ -307,13 +314,18 @@ def main(arguments):
     word_ids, cooccurrences = get_or_build(arguments.cooccur_path,
                                            build_cooccur, vocab, corpus,
                                            arguments.window_size)
-    logger.info("Cooccurrence matrix fetch complete.\n")
+    logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
+                cooccurrences.getnnz())
 
-    # Convert cooccurrence matrix to CSR form for faster reads
-    cooccurrences = cooccurrences.asformat('csr')
+    cooccurrences = cooccurrences.asformat('coo')
+    cooccurrence_list = [(w1, w2, x)
+                         for w1, w2, x in itertools.izip(cooccurrences.row,
+                                                         cooccurrences.col,
+                                                         cooccurrences.data)]
 
     logger.info("Beginning GloVe training..")
-    W = train_glove(word_ids, cooccurrences, vector_size=arguments.vector_size,
+    W = train_glove(word_ids, cooccurrence_list,
+                    vector_size=arguments.vector_size,
                     iterations=arguments.iterations,
                     learning_rate=arguments.learning_rate)
 
