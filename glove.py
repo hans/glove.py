@@ -329,9 +329,12 @@ def main(arguments):
                     iterations=arguments.iterations,
                     learning_rate=arguments.learning_rate)
 
+    # Model data to be saved
+    model = (word_ids, W)
+
     # TODO shave off bias values, do something with context vectors
     with open(arguments.vector_path, 'wb') as vector_f:
-        pickle.dump(W, vector_f)
+        pickle.dump(model, vector_f)
 
     logger.info("Saved vectors to %s", arguments.vector_path)
 
