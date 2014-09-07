@@ -35,7 +35,7 @@ def parse_args():
 
     g_cooccur = parser.add_argument_group('Cooccurrence tracking options')
     g_cooccur.add_argument('--cooccur-path',
-                           help=('Path to coocurrence matrix file. If '
+                           help=('Path to cooccurrence matrix file. If '
                                  'this path exists, the matrix will be '
                                  'loaded from the file. If it does not '
                                  'exist, the matrix will be written to '
