@@ -143,6 +143,23 @@ def build_cooccur(vocab, corpus, window_size=10):
     return word_ids, cooccurrences
 
 
+def iter_cooccurrences(lil_matrix):
+    """
+    Yield `(w1, w2, x)` pairs from a LiL sparse matrix as produced by
+    `build_cooccur`, where `w1` is a row index (word ID), `w2` is a
+    column index (context word ID), and `x` is a cell value
+    ($X_{w1, w2}$).
+    """
+
+    # This function is built for LiL-format sparse matrices only
+    assert isinstance(lil_matrix, sparse.lil_matrix)
+
+    for i, (row, data) in enumerate(itertools.izip(lil_matrix.rows,
+                                                   lil_matrix.data)):
+        for data_idx, j in enumerate(row):
+            yield i, j, data[data_idx]
+
+
 def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
              gradient_squared_biases,
              learning_rate=0.05, x_max=100, alpha=0.75):
@@ -317,11 +334,7 @@ def main(arguments):
     logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
                 cooccurrences.getnnz())
 
-    cooccurrences = cooccurrences.asformat('coo')
-    cooccurrence_list = [(w1, w2, x)
-                         for w1, w2, x in itertools.izip(cooccurrences.row,
-                                                         cooccurrences.col,
-                                                         cooccurrences.data)]
+    cooccurrence_list = list(iter_cooccurrences(cooccurrences))
 
     logger.info("Beginning GloVe training..")
     W = train_glove(word_ids, cooccurrence_list,
