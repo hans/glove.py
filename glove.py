@@ -216,7 +216,7 @@ def gradient_updates(cost, v_main, v_context, b_main, b_context, gradsq_main,
     updates.append((v_main,
                     -learning_rate * grad_main / T.sqrt(gradsq_main)))
     updates.append((v_context,
-                    -learning_rate * grad_context / T.sqrt(gradsq_context))
+                    -learning_rate * grad_context / T.sqrt(gradsq_context)))
 
     # Update squared gradient sums
     # gradsq_ = T.inc_subtensor(gradsq_main, grad_main ** 2)
@@ -239,7 +239,7 @@ def gradient_updates(cost, v_main, v_context, b_main, b_context, gradsq_main,
     updates.append((b_main,
                     -learning_rate * grad_b_main / T.sqrt(gradsq_b_main)))
     updates.append((b_context,
-                    -learning_rate * grad_b_context / T.sqrt(gradsq_b_context))
+                    -learning_rate * grad_b_context / T.sqrt(gradsq_b_context)))
 
     # Update squared gradient sums
     # gradsq_b_ = T.inc_subtensor(gradsq_b[main_word_id],
