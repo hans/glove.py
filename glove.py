@@ -11,6 +11,8 @@ from random import shuffle
 
 import numpy as np
 from scipy import sparse
+import theano
+import theano.tensor as T
 
 
 logging.basicConfig()
@@ -160,8 +162,98 @@ def iter_cooccurrences(lil_matrix):
             yield i, j, data[data_idx]
 
 
-def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
-             gradient_squared_biases,
+def cost(v_main, v_context, b_main, b_context, cooccurrence, *args):
+    """
+    Compute the cost for the given cooccurrence pair with the present
+    weight assignments.
+
+    :parameters:
+        - v_main : theano.tensor.var.TensorVariable
+            Vector representation of main word
+        - v_context : theano.tensor.var.TensorVariable
+            Vector representation of context word
+        - b_main : theano.tensor.var.TensorVariable
+            Bias value for main word
+        - b_context : theano.tensor.var.TensorVariable
+            Bias value for context word
+        - coocccurrence : theano.tensor.var.TensorVariable
+            Calculated value for cooccurrence pair
+
+    :returns:
+        - cost : theano.tensor.var.TensorVariable
+            Cost of this cooccurrence with the given parameters
+    """
+
+    return T.dot(v_main, v_context) + b_main + b_context - T.log(cooccurrence)
+
+
+def gradient_updates(cost, v_main, v_context, b_main, b_context, gradsq_main,
+                     gradsq_context, gradsq_b_main, gradsq_b_context,
+                     learning_rate):
+    """
+    Compute gradient updates for adaptive gradient descent on a single
+    example.
+
+    Returns a list of a form suitable for use with Theano function
+    updates.
+    """
+
+    updates = []
+
+    # TODO make sure this works, then compress into a `params` array
+    # with a for loop!
+
+    # Compute gradients for word vector elements.
+    grad_main = T.grad(cost, wrt=v_main)
+    grad_context = T.grad(cost, wrt=v_context)
+
+    # Now perform adaptive updates
+    # W_ = T.inc_subtensor(v_main,
+    #                      -learning_rate * grad_main / T.sqrt(gradsq_main))
+    # W_ = T.inc_subtensor(v_context,
+    #                      -learning_rate * grad_context / T.sqrt(gradsq_context))
+    # updates.append((W, W_))
+    updates.append((v_main,
+                    -learning_rate * grad_main / T.sqrt(gradsq_main)))
+    updates.append((v_context,
+                    -learning_rate * grad_context / T.sqrt(gradsq_context))
+
+    # Update squared gradient sums
+    # gradsq_ = T.inc_subtensor(gradsq_main, grad_main ** 2)
+    # gradsq_ = T.inc_subtensor(gradsq_context, grad_context ** 2)
+    # updates.append((gradsq, gradsq_))
+    updates.append((gradsq_main, grad_main ** 2))
+    updates.append((gradsq_context, grad_context ** 2))
+
+    # Compute gradients for bias terms
+    grad_b_main = T.grad(cost, b_main)
+    grad_b_context = T.grad(cost, b_context)
+
+    # b_ = T.inc_subtensor(b[main_word_id],
+    #                      -learning_rate * grad_bias_main / T.sqrt(
+    #                          gradsq_b[main_word_id]))
+    # b_ = T.inc_subtensor(b[context_word_shifted],
+    #                      -learning_rate * grad_bias_context / T.sqrt(
+    #                          gradsq_b[context_word_shifted]))
+    # updates.append((b, b_))
+    updates.append((b_main,
+                    -learning_rate * grad_b_main / T.sqrt(gradsq_b_main)))
+    updates.append((b_context,
+                    -learning_rate * grad_b_context / T.sqrt(gradsq_b_context))
+
+    # Update squared gradient sums
+    # gradsq_b_ = T.inc_subtensor(gradsq_b[main_word_id],
+    #                             grad_bias_main ** 2)
+    # gradsq_b_ = T.inc_subtensor(gradsq_b[context_word_shifted],
+    #                             grad_bias_context ** 2)
+    # updates.append((gradsq_b, gradsq_b_))
+    updates.append((gradsq_b_main, grad_b_main ** 2))
+    updates.append((gradsq_b_context, grad_b_context ** 2))
+
+    return updates
+
+
+def run_iter(word_ids, cooccurrence_list, W, biases, gradsq, gradsq_b,
              learning_rate=0.05, x_max=100, alpha=0.75):
     """
     Run a single iteration of GloVe training using the given
@@ -186,9 +278,8 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
     computing the cost for two word pairs; see the GloVe paper for more
     details.
 
-    Returns a tuple of the form
-
-        (cost, W, biases, gradient_squared, gradient_squared_biases)
+    Returns the feedforward cost associated with the given inputs and updates
+    the weights by SGD in place.
     """
 
     vocab_size = len(word_ids)
@@ -197,65 +288,46 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
     # We want to iterate over co-occurrence pairs randomly so as not to
     # unintentionally bias the word vector contents. We'll simply work
     # on the shuffled Cartesian product of the word IDs.
+    #
+    # TODO do we need to shuffle every time?
     shuffle(cooccurrence_list)
 
-    for main_word_id, context_word_id, cooccurrence in cooccurrence_list:
+    v_main = T.fvector('v_main')
+    v_context = T.fvector('v_context')
+    b_main = T.fscalar('b_main')
+    b_context = T.fscalar('b_context')
+    cooccurrence = T.fscalar('cooccurrence')
+
+    gradsq_main = T.fvector('gradsq_main')
+    gradsq_context = T.fvector('gradsq_context')
+    gradsq_b_main = T.fscalar('gradsq_b_main')
+    gradsq_b_context = T.fscalar('gradsq_b_context')
+
+    train = theano.function(
+        [v_main, v_context, b_main, b_context, cooccurrence,
+         gradsq_main, gradsq_context, gradsq_b_main, gradsq_b_context],
+        cost,
+        updates=gradient_updates(cost, v_main, v_context, b_main, b_context,
+                                 gradsq_main, gradsq_context, gradsq_b_main,
+                                 gradsq_b_context, learning_rate))
+
+    global_cost = 0.
+
+    for i_main, i_context, cooccurrence in cooccurrence_list:
         # Shift context word ID so that we fetch a different vector when
         # we examine a given word as main and that same word as context
-        context_word_shifted = context_word_id + vocab_size
+        i_context += vocab_size
 
-        # Fetch main word vector
-        main_word = W[main_word_id]
+        v_main, v_context = W[i_main], W[i_context]
+        b_main, b_context = b[i_main], b[i_context]
+        gradsq_main, gradsq_context = gradsq[i_main], gradsq[i_context]
+        gradsq_b_main, gradsq_b_context = gradsq_b[i_main], gradsq_b[i_context]
 
-        # Fetch context word vector (stored separately from its own
-        # main-word vector)
-        context_word = W[context_word_shifted]
+        global_cost += train(v_main, v_context, b_main, b_context, cooccurrence,
+                             gradsq_main, gradsq_context, gradsq_b_main,
+                             gradsq_b_context)
 
-        # Compute unweighted cost
-        #
-        #   $$ J' = w_i^Tw_j + b_i + b_j - log(X_{ij}) $$
-        cost = (main_word.dot(context_word) + biases[main_word_id]
-                + biases[context_word_shifted] - log(cooccurrence))
-
-        weight = (cooccurrence / x_max) ** alpha if cooccurrence < x_max else 1
-
-        # Add weighted cost to the global cost tracker
-        global_cost += 0.5 * weight * (cost ** 2)
-
-        # Compute gradients for word vector elements.
-        #
-        # NB: `main_word` is only a view into `W` (not a copy), so our
-        # modifications here will affect the global weight matrix;
-        # likewise for context_word
-        grad_main = weight * cost * context_word
-        grad_context = weight * cost * main_word
-
-        # Now perform adaptive updates
-        main_word -= (learning_rate * grad_main / np.sqrt(
-            gradient_squared[main_word_id]))
-        context_word -= (learning_rate * grad_context / np.sqrt(
-            gradient_squared[context_word_shifted]))
-
-        # Update squared gradient sums
-        gradient_squared[main_word_id] += np.square(grad_main)
-        gradient_squared[context_word_shifted] += np.square(grad_context)
-
-        # Compute gradients for bias terms
-        grad_bias_main = weight * cost
-        grad_bias_context = weight * cost
-
-        biases[main_word_id] -= (learning_rate * grad_bias_main / np.sqrt(
-            gradient_squared_biases[main_word_id]))
-
-        biases[context_word_shifted] -= (
-            learning_rate * grad_bias_context / np.sqrt(
-                gradient_squared_biases[context_word_shifted]))
-
-        # Update squared gradient sums
-        gradient_squared_biases[main_word_id] += grad_bias_main ** 2
-        gradient_squared_biases[context_word_shifted] += grad_bias_context ** 2
-
-    return global_cost, W, biases, gradient_squared, gradient_squared_biases
+    return global_cost
 
 
 def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
@@ -287,11 +359,14 @@ def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
     # It is up to the client to decide what to do with the resulting two
     # vectors. Pennington et al. (2014) suggest adding or averaging the
     # two for each word, or discarding the context vectors.
-    W = np.random.randn(vocab_size * 2, vector_size) - 0.5
+    W_ = np.random.randn(vocab_size * 2, vector_size,
+                         dtype=theano.config.floatX) - 0.5
+    W = theano.shared(W, name='W')
 
     # Bias terms, each associated with a single vector. An array of size
     # $2V$, initialized randomly in the range (-0.5, 0.5].
-    biases = np.random.randn(vocab_size * 2) - 0.5
+    b_ = np.random.randn(vocab_size * 2, dtype=theano.config.floatX)
+    b = theano.shared(b_ - 0.5, name = 'b')
 
     # Training is done via adaptive gradient descent (AdaGrad). To make
     # this work we need to store the sum of squares of all previous
@@ -301,18 +376,18 @@ def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
     #
     # Initialize all squared gradient sums to 1 so that our initial
     # adaptive learning rate is simply the global learning rate.
-    gradient_squared = np.ones((vocab_size * 2, vector_size),
-                               dtype=np.float64)
+    gradsq_ = np.ones((vocab_size * 2, vector_size), dtype=theano.config.floatX)
+    gradsq = theano.shared(gradsq_, name='gradsq')
 
     # Sum of squared gradients for the bias terms.
-    gradient_squared_biases = np.ones(vocab_size * 2, dtype=np.float64)
+    gradsq_b_ = np.ones(vocab_size * 2, dtype=theano.config.floatX)
+    gradsq_b = theano.shared(gradsq_b_, name='gradsq_b')
 
     for i in range(iterations):
         logger.info("\tBeginning iteration %i..", i)
 
-        cost, W, biases, gradient_squared, gradient_squared_biases = (
-            run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
-                     gradient_squared_biases))
+        cost = run_iter(word_ids, cooccurrence_list, W, biases,
+                        gradient_squared, gradient_squared_biases)
 
         logger.info("\t\tDone (cost %f)", cost)
 
