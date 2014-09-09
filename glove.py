@@ -162,211 +162,209 @@ def iter_cooccurrences(lil_matrix):
             yield i, j, data[data_idx]
 
 
-def gradient_updates(cost, v_main, v_context, b_main, b_context,
-                     gradsq_W_main, gradsq_W_context,
-                     gradsq_b_main, gradsq_b_context,
-                     learning_rate):
+class GloVe(object):
     """
-    Compute gradient updates for adaptive gradient descent on a single
-    example.
-
-    Returns a list of a form suitable for use with Theano function
-    updates.
+    Wrapper for performing GloVe training.
     """
 
-    updates = []
+    def __init__(self, word_ids, cooccurrence_list, vector_size=100):
+        """
+        Prepare to train GloVe vectors on the given `cooccurrence_list`,
+        where each element is of the form
 
-    # TODO make sure this works, then compress into a `params` array
-    # with a for loop!
+            (word_i_id, word_j_id, x_ij)
 
-    # Compute gradients for word vector elements.
-    grad_main = T.grad(cost, wrt=v_main)
-    grad_context = T.grad(cost, wrt=v_context)
+        where `x_ij` is a cooccurrence value $X_{ij}$ as presented in
+        the matrix defined by `build_cooccur` and the Pennington et al.
+        (2014) paper itself.
 
-    # Now perform adaptive updates
-    W_ = T.inc_subtensor(v_main,
-                         -learning_rate * grad_main / T.sqrt(gradsq_W_main))
-    W_ = T.inc_subtensor(v_context,
-                         -learning_rate * grad_context / T.sqrt(gradsq_W_context))
-    updates.append((W, W_))
+        `word_ids` should be provided as returned by `build_cooccur`.
+        """
 
-    # Update squared gradient sums
-    gradsq_W_ = T.inc_subtensor(gradsq_W_main, grad_main ** 2)
-    gradsq_W_ = T.inc_subtensor(gradsq_W_context, grad_context ** 2)
-    updates.append((gradsq_W, gradsq_W_))
+        self.word_ids = word_ids
 
-    # Compute gradients for bias terms
-    grad_b_main = T.grad(cost, b_main)
-    grad_b_context = T.grad(cost, b_context)
+        # We want to iterate over co-occurrence pairs randomly so as not
+        # to unintentionally bias the word vector contents. We'll simply
+        # work on the shuffled Cartesian product of the word IDs.
+        self.cooccurrence_list = cooccurrence_list
+        shuffle(self.cooccurrence_list)
 
-    b_ = T.inc_subtensor(b_main,
-                         -learning_rate * grad_b_main / T.sqrt(gradsq_b_main))
-    b_ = T.inc_subtensor(b_context,
-                         -learning_rate * grad_b_context / T.sqrt(gradsq_b_context))
-    updates.append((b, b_))
+        self.vocab_size = len(word_ids)
+        self.vector_size = vector_size
 
-    # Update squared gradient sums
-    gradsq_b_ = T.inc_subtensor(gradsq_b_main, grad_b_main ** 2)
-    gradsq_b_ = T.inc_subtensor(gradsq_b_context, grad_b_context ** 2)
-    updates.append((gradsq_b, gradsq_b_))
+        # Word vector matrix. This matrix is (2V) * d, where N is the
+        # size of the corpus vocabulary and d is the dimensionality of
+        # the word vectors. All elements are initialized randomly in the
+        # range (-0.5, 0.5]. We build two word vectors for each word:
+        # one for the word as the main (center) word and one for the
+        # word as a context word.
+        #
+        # It is up to the client to decide what to do with the resulting
+        # two vectors. Pennington et al. (2014) suggest adding or
+        # averaging the two for each word, or discarding the context
+        # vectors.
+        W_ = np.random.randn(self.vocab_size * 2, vector_size) - 0.5
+        self.W = theano.shared(W_.astype(theano.config.floatX), name='W')
 
-    return updates
+        # Bias terms, each associated with a single vector. An array of
+        # size $2V$, initialized randomly in the range (-0.5, 0.5].
+        b_ = np.random.randn(self.vocab_size * 2) - 0.5
+        self.b = theano.shared(b_.astype(theano.config.floatX), name = 'b')
 
+        # Training is done via adaptive gradient descent (AdaGrad). To
+        # make this work we need to store the sum of squares of all
+        # previous gradients.
+        #
+        # Like `W`, this matrix is (2V) * d.
+        #
+        # Initialize all squared gradient sums to 1 so that our initial
+        # adaptive learning rate is simply the global learning rate.
+        gradsq_W_ = np.ones((self.vocab_size * 2, vector_size))
+        self.gradsq_W = theano.shared(gradsq_W_.astype(theano.config.floatX),
+                                      name='gradsq_W')
 
-def run_iter(word_ids, cooccurrence_list,
-             learning_rate=0.05, x_max=100, alpha=0.75):
-    """
-    Run a single iteration of GloVe training using the given
-    cooccurrence data and the previously computed weight vectors /
-    biases and accompanying gradient histories.
+        # Sum of squared gradients for the bias terms.
+        gradsq_b_ = np.ones(self.vocab_size * 2)
+        self.gradsq_b = theano.shared(gradsq_b_.astype(theano.config.floatX),
+                                      name='gradsq_b')
 
-    `word_ids` should be provided as returned by `build_cooccur`.
+    def train(self, iterations=25, **kwargs):
+        """
+        Train GloVe vectors with the given cooccurrence data.
 
-    `cooccurrence_list` is a list where each element is of the form
+        Keyword arguments are passed on to the `run_iter` step method.
+        """
 
-        (word_i_id, word_j_id, x_ij)
+        for i in range(iterations):
+            logger.info("\tBeginning iteration %i..", i)
+            cost = self.run_iter(**kwargs)
+            logger.info("\t\tDone (cost %f)", cost)
 
-    where `x_ij` is a cooccurrence value $X_{ij}$ as presented in the
-    matrix defined by `build_cooccur` and the Pennington et al. (2014)
-    paper itself.
+    def run_iter(self, learning_rate=0.05, x_max=100, alpha=0.75):
+        """
+        Run a single iteration of GloVe training using the given
+        cooccurrence data and the previously computed weight vectors /
+        biases and accompanying gradient histories.
 
-    See the `train_glove` function for information on the shapes of `W`,
-    `biases`, `gradient_squared`, `gradient_squared_biases` and how they
-    should be initialized.
+        The parameters `x_max`, `alpha` define our weighting function
+        when computing the cost for two word pairs; see the GloVe paper
+        for more details.
 
-    The parameters `x_max`, `alpha` define our weighting function when
-    computing the cost for two word pairs; see the GloVe paper for more
-    details.
+        Returns the feedforward cost associated with the given inputs
+        and updates the weights by SGD in place.
+        """
 
-    Returns the feedforward cost associated with the given inputs and updates
-    the weights by SGD in place.
-    """
+        global_cost = 0.
 
-    vocab_size = len(word_ids)
-    global_cost = 0
+        i_main = T.lscalar('i_main')
+        i_context = T.lscalar('i_context')
 
-    # We want to iterate over co-occurrence pairs randomly so as not to
-    # unintentionally bias the word vector contents. We'll simply work
-    # on the shuffled Cartesian product of the word IDs.
-    #
-    # TODO do we need to shuffle every time?
-    shuffle(cooccurrence_list)
+        v_main, v_context = T.dvector('v_main'), T.dvector('d_context')
+        b_main, b_context = T.dscalar('b_main'), T.dscalar('b_context')
+        gradsq_W_main, gradsq_W_context = (T.dvector('gradsq_W_main'),
+                                           T.dvector('gradsq_W_context'))
+        gradsq_b_main, gradsq_b_context = (T.dscalar('gradsq_b_main'),
+                                           T.dscalar('gradsq_b_context'))
 
-    i_main = T.lscalar('i_main')
-    i_context = T.lscalar('i_context')
+        # v_main, v_context = self.W[i_main], self.W[i_context]
+        # b_main, b_context = self.b[i_main], self.b[i_context]
+        # gradsq_W_main, gradsq_W_context = (self.gradsq_W[i_main],
+        #                                    self.gradsq_W[i_context])
+        # gradsq_b_main, gradsq_b_context = (self.gradsq_b[i_main],
+        #                                    self.gradsq_b[i_context])
+        cooccurrence = T.dscalar('cooccurrence')
 
-    v_main, v_context = W[i_main], W[i_context]
-    b_main, b_context = b[i_main], b[i_context]
-    gradsq_W_main, gradsq_W_context = gradsq_W[i_main], gradsq_W[i_context]
-    gradsq_b_main, gradsq_b_context = gradsq_b[i_main], gradsq_b[i_context]
-    cooccurrence = T.dscalar('cooccurrence')
+        # Cost function
+        cost = (T.dot(v_main, v_context) + b_main + b_context
+                - T.log(cooccurrence))
 
-    fetch_params = theano.function([i_main, i_context],
-                                   [v_main, v_context, b_main, b_context,
-                                    gradsq_W_main, gradsq_W_context,
-                                    gradsq_b_main, gradsq_b_context])
+        train = theano.function(
+            [i_main, i_context, cooccurrence],
 
-    # Cost function
-    cost = T.dot(v_main, v_context) + b_main + b_context - T.log(cooccurrence)
+            cost,
 
-    train = theano.function(
-        [i_main, i_context, v_main, v_context, b_main, b_context,
-         gradsq_W_main, gradsq_W_context,
-         gradsq_b_main, gradsq_b_context,
-         cooccurrence],
-        cost,
-        updates=gradient_updates(cost, v_main, v_context, b_main, b_context,
-                                 gradsq_W_main, gradsq_W_context,
-                                 gradsq_b_main, gradsq_b_context,
-                                 learning_rate),
-        on_unused_input='warn')
+            given={
+                v_main: self.W[i_main], v_context: self.W[i_context],
+                b_main: self.b[i_main], b_context: self.b[i_context],
+                gradsq_W_main: self.gradsq_W[i_main],
+                gradsq_W_context: self.gradsq_W[i_context],
+                gradsq_b_main: self.gradsq_b[i_main],
+                gradsq_b_context: self.gradsq_b[i_context]},
 
-    global_cost = 0.
+            updates=self.gradient_updates(cost, i_main, i_context,
+                                          learning_rate),
 
-    # Run online AdaGrad learning
-    for i_main, i_context, cooccurrence in cooccurrence_list:
-        # Shift context word ID so that we fetch a different vector when
-        # we examine a given word as main and that same word as context
-        i_context += vocab_size
+            on_unused_input='warn')
 
-        (v_main, v_context, b_main, b_context,
-         gradsq_W_main, gradsq_W_context,
-         gradsq_b_main, gradsq_b_context) = fetch_params(i_main, i_context)
+        # Run online AdaGrad learning
+        for i_main, i_context, cooccurrence in self.cooccurrence_list:
+            # Shift context word ID so that we fetch a different vector
+            # when we examine a given word as main and that same word as
+            # context
+            i_context += self.vocab_size
 
-        global_cost += train(i_main, i_context,
-                             v_main, v_context, b_main, b_context,
-                             gradsq_W_main, gradsq_W_context,
-                             gradsq_b_main, gradsq_b_context,
-                             cooccurrence)
+            # (v_main, v_context, b_main, b_context,
+            #  gradsq_W_main, gradsq_W_context,
+            # gradsq_b_main, gradsq_b_context) = fetch_params(i_main, i_context)
 
-    return global_cost
+            global_cost += train(i_main, i_context, cooccurrence)
 
+        return global_cost
 
-W, b, gradsq_W, gradsq_b = None, None, None, None
+    def gradient_updates(self, cost, i_main, i_context, learning_rate):
+        """
+        Compute gradient updates for adaptive gradient descent on a
+        single example.
 
-def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
-                **kwargs):
-    """
-    Train GloVe vectors on the given `cooccurrence_list`, where each
-    element is of the form
+        Returns a list of a form suitable for use with Theano function
+        updates.
+        """
 
-        (word_i_id, word_j_id, x_ij)
+        updates = []
 
-    where `x_ij` is a cooccurrence value $X_{ij}$ as presented in the
-    matrix defined by `build_cooccur` and the Pennington et al. (2014)
-    paper itself.
+        v_main, v_context = self.W[i_main], self.W[i_context]
+        b_main, b_context = self.b[i_main], self.b[i_context]
+        gradsq_W_main, gradsq_W_context = (self.gradsq_W[i_main],
+                                           self.gradsq_W[i_context])
+        gradsq_b_main, gradsq_b_context = (self.gradsq_b[i_main],
+                                           self.gradsq_b[i_context])
 
-    Keyword arguments are passed on to the iteration step function
-    `run_iter`.
+        # Compute gradients for word vector elements.
+        grad_main = T.grad(cost, wrt=v_main)
+        grad_context = T.grad(cost, wrt=v_context)
 
-    Returns the computed word vector matrix `W`.
-    """
+        # Now perform adaptive updates
+        W_ = T.inc_subtensor(v_main,
+                             (-learning_rate * grad_main
+                              / T.sqrt(gradsq_W_main)))
+        W_ = T.inc_subtensor(v_context,
+                             (-learning_rate * grad_context
+                              / T.sqrt(gradsq_W_context)))
+        updates.append((self.W, W_))
 
-    vocab_size = len(word_ids)
+        # Update squared gradient sums
+        gradsq_W_ = T.inc_subtensor(gradsq_W_main, grad_main ** 2)
+        gradsq_W_ = T.inc_subtensor(gradsq_W_context, grad_context ** 2)
+        updates.append((self.gradsq_W, gradsq_W_))
 
-    global W, b, gradsq_W, gradsq_b
-    # Word vector matrix. This matrix is (2V) * d, where N is the size
-    # of the corpus vocabulary and d is the dimensionality of the word
-    # vectors. All elements are initialized randomly in the range (-0.5,
-    # 0.5]. We build two word vectors for each word: one for the word as
-    # the main (center) word and one for the word as a context word.
-    #
-    # It is up to the client to decide what to do with the resulting two
-    # vectors. Pennington et al. (2014) suggest adding or averaging the
-    # two for each word, or discarding the context vectors.
-    W_ = np.random.randn(vocab_size * 2, vector_size) - 0.5
-    W = theano.shared(W_.astype(theano.config.floatX), name='W')
+        # Compute gradients for bias terms
+        grad_b_main = T.grad(cost, b_main)
+        grad_b_context = T.grad(cost, b_context)
 
-    # Bias terms, each associated with a single vector. An array of size
-    # $2V$, initialized randomly in the range (-0.5, 0.5].
-    b_ = np.random.randn(vocab_size * 2) - 0.5
-    b = theano.shared(b_.astype(theano.config.floatX), name = 'b')
+        b_ = T.inc_subtensor(b_main,
+                             (-learning_rate * grad_b_main
+                              / T.sqrt(gradsq_b_main)))
+        b_ = T.inc_subtensor(b_context,
+                             (-learning_rate * grad_b_context
+                              / T.sqrt(gradsq_b_context)))
+        updates.append((self.b, b_))
 
-    # Training is done via adaptive gradient descent (AdaGrad). To make
-    # this work we need to store the sum of squares of all previous
-    # gradients.
-    #
-    # Like `W`, this matrix is (2V) * d.
-    #
-    # Initialize all squared gradient sums to 1 so that our initial
-    # adaptive learning rate is simply the global learning rate.
-    gradsq_W_ = np.ones((vocab_size * 2, vector_size))
-    gradsq_W = theano.shared(gradsq_W_.astype(theano.config.floatX),
-                             name='gradsq_W')
+        # Update squared gradient sums
+        gradsq_b_ = T.inc_subtensor(gradsq_b_main, grad_b_main ** 2)
+        gradsq_b_ = T.inc_subtensor(gradsq_b_context, grad_b_context ** 2)
+        updates.append((self.gradsq_b, gradsq_b_))
 
-    # Sum of squared gradients for the bias terms.
-    gradsq_b_ = np.ones(vocab_size * 2)
-    gradsq_b = theano.shared(gradsq_b_.astype(theano.config.floatX),
-                             name='gradsq_b')
-
-    for i in range(iterations):
-        logger.info("\tBeginning iteration %i..", i)
-
-        cost = run_iter(word_ids, cooccurrence_list)
-
-        logger.info("\t\tDone (cost %f)", cost)
-
-    return W
+        return updates
 
 
 def main(arguments):
@@ -387,13 +385,13 @@ def main(arguments):
     cooccurrence_list = list(iter_cooccurrences(cooccurrences))
 
     logger.info("Beginning GloVe training..")
-    W = train_glove(word_ids, cooccurrence_list,
-                    vector_size=arguments.vector_size,
-                    iterations=arguments.iterations,
-                    learning_rate=arguments.learning_rate)
+    glove = GloVe(word_ids, cooccurrence_list,
+                  vector_size=arguments.vector_size)
+    glove.train(iterations=arguments.iterations,
+                learning_rate=arguments.learning_rate)
 
     # Model data to be saved
-    model = (word_ids, W)
+    model = (word_ids, glove.W)
 
     # TODO shave off bias values, do something with context vectors
     with open(arguments.vector_path, 'wb') as vector_f:
