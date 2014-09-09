@@ -189,17 +189,11 @@ def gradient_updates(cost, v_main, v_context, b_main, b_context,
     W_ = T.inc_subtensor(v_context,
                          -learning_rate * grad_context / T.sqrt(gradsq_W_context))
     updates.append((W, W_))
-    # updates.append((v_main,
-    #                 -learning_rate * grad_main / T.sqrt(gradsq_W_main)))
-    # updates.append((v_context,
-    #                 -learning_rate * grad_context / T.sqrt(gradsq_W_context)))
 
     # Update squared gradient sums
     gradsq_W_ = T.inc_subtensor(gradsq_W_main, grad_main ** 2)
     gradsq_W_ = T.inc_subtensor(gradsq_W_context, grad_context ** 2)
     updates.append((gradsq_W, gradsq_W_))
-    # updates.append((gradsq_main, grad_main ** 2))
-    # updates.append((gradsq_context, grad_context ** 2))
 
     # Compute gradients for bias terms
     grad_b_main = T.grad(cost, b_main)
@@ -210,17 +204,11 @@ def gradient_updates(cost, v_main, v_context, b_main, b_context,
     b_ = T.inc_subtensor(b_context,
                          -learning_rate * grad_b_context / T.sqrt(gradsq_b_context))
     updates.append((b, b_))
-    # updates.append((b_main,
-    #                 -learning_rate * grad_b_main / T.sqrt(gradsq_b_main)))
-    # updates.append((b_context,
-    #                 -learning_rate * grad_b_context / T.sqrt(gradsq_b_context)))
 
     # Update squared gradient sums
     gradsq_b_ = T.inc_subtensor(gradsq_b_main, grad_b_main ** 2)
     gradsq_b_ = T.inc_subtensor(gradsq_b_context, grad_b_context ** 2)
     updates.append((gradsq_b, gradsq_b_))
-    # updates.append((gradsq_b_main, grad_b_main ** 2))
-    # updates.append((gradsq_b_context, grad_b_context ** 2))
 
     return updates
 
