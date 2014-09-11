@@ -382,6 +382,8 @@ def main(arguments):
     logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
                 cooccurrences.getnnz())
 
+    cooccurrence_list = list(iter_cooccurrences(cooccurrences))
+
     logger.info("Beginning GloVe training..")
     glove = GloVe(word_ids, cooccurrence_list,
                   vector_size=arguments.vector_size)
