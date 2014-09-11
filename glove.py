@@ -160,8 +160,7 @@ def iter_cooccurrences(lil_matrix):
             yield i, j, data[data_idx]
 
 
-def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
-             gradient_squared_biases,
+def run_iter(word_ids, data,
              learning_rate=0.05, x_max=100, alpha=0.75):
     """
     Run a single iteration of GloVe training using the given
@@ -170,13 +169,18 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
 
     `word_ids` should be provided as returned by `build_cooccur`.
 
-    `cooccurrence_list` is a list where each element is of the form
+    `data` is a pre-fetched data / weights list where each element is of
+    the form
 
-        (word_i_id, word_j_id, x_ij)
+        (v_main, v_context,
+         b_main, b_context,
+         gradsq_W_main, gradsq_W_context,
+         gradsq_b_main, gradsq_b_context,
+         cooccurrence)
 
-    where `x_ij` is a cooccurrence value $X_{ij}$ as presented in the
-    matrix defined by `build_cooccur` and the Pennington et al. (2014)
-    paper itself.
+    as produced by the `train_glove` function. Each element in this
+    tuple is an `ndarray` view into the data structure which contains
+    it.
 
     See the `train_glove` function for information on the shapes of `W`,
     `biases`, `gradient_squared`, `gradient_squared_biases` and how they
@@ -186,38 +190,26 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
     computing the cost for two word pairs; see the GloVe paper for more
     details.
 
-    Returns a tuple of the form
-
-        (cost, W, biases, gradient_squared, gradient_squared_biases)
+    Returns the cost associated with the given weight assignments and
+    updates the weights by online AdaGrad in place.
     """
 
-    vocab_size = len(word_ids)
     global_cost = 0
 
-    # We want to iterate over co-occurrence pairs randomly so as not to
-    # unintentionally bias the word vector contents. We'll simply work
-    # on the shuffled Cartesian product of the word IDs.
-    shuffle(cooccurrence_list)
+    # We want to iterate over data randomly so as not to unintentionally
+    # bias the word vector contents
+    shuffle(data)
 
-    for main_word_id, context_word_id, cooccurrence in cooccurrence_list:
-        # Shift context word ID so that we fetch a different vector when
-        # we examine a given word as main and that same word as context
-        context_word_shifted = context_word_id + vocab_size
-
-        # Fetch main word vector
-        main_word = W[main_word_id]
-
-        # Fetch context word vector (stored separately from its own
-        # main-word vector)
-        context_word = W[context_word_shifted]
+    for (v_main, v_context, b_main, b_context, gradsq_W_main, gradsq_W_context,
+         gradsq_b_main, gradsq_b_context, cooccurrence) in data:
 
         weight = (cooccurrence / x_max) ** alpha if cooccurrence < x_max else 1
 
         # Compute cost
         #
         #   $$ J' = w_i^Tw_j + b_i + b_j - log(X_{ij}) $$
-        cost = weight * (main_word.dot(context_word) + biases[main_word_id]
-                         + biases[context_word_shifted] - log(cooccurrence))
+        cost = weight * (v_main.dot(v_context) + b_main[0] + b_context[0]
+                         - log(cooccurrence))
 
         # Add weighted cost to the global cost tracker
         global_cost += 0.5 * (cost ** 2)
@@ -227,42 +219,37 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
         # NB: `main_word` is only a view into `W` (not a copy), so our
         # modifications here will affect the global weight matrix;
         # likewise for context_word
-        grad_main = cost * context_word
-        grad_context = cost * main_word
+        grad_main = cost * v_context
+        grad_context = cost * v_main
 
         # Now perform adaptive updates
-        main_word -= (learning_rate * grad_main / np.sqrt(
-            gradient_squared[main_word_id]))
-        context_word -= (learning_rate * grad_context / np.sqrt(
-            gradient_squared[context_word_shifted]))
+        v_main -= (learning_rate * grad_main / np.sqrt(gradsq_W_main))
+        v_context -= (learning_rate * grad_context / np.sqrt(gradsq_W_context))
 
         # Update squared gradient sums
-        gradient_squared[main_word_id] += np.square(grad_main)
-        gradient_squared[context_word_shifted] += np.square(grad_context)
+        gradsq_W_main += np.square(grad_main)
+        gradsq_W_context += np.square(grad_context)
 
         # Compute gradients for bias terms
         grad_bias_main = cost
         grad_bias_context = cost
 
-        biases[main_word_id] -= (learning_rate * grad_bias_main / np.sqrt(
-            gradient_squared_biases[main_word_id]))
-
-        biases[context_word_shifted] -= (
-            learning_rate * grad_bias_context / np.sqrt(
-                gradient_squared_biases[context_word_shifted]))
+        b_main -= (learning_rate * grad_bias_main / np.sqrt(gradsq_b_main))
+        b_context -= (learning_rate * grad_bias_context / np.sqrt(
+                gradsq_b_context))
 
         # Update squared gradient sums
-        gradient_squared_biases[main_word_id] += grad_bias_main ** 2
-        gradient_squared_biases[context_word_shifted] += grad_bias_context ** 2
+        gradsq_b_main += grad_bias_main ** 2
+        gradsq_b_context += grad_bias_context ** 2
 
-    return global_cost, W, biases, gradient_squared, gradient_squared_biases
+    return global_cost
 
 
-def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
+def train_glove(word_ids, cooccurrences, vector_size=100, iterations=25,
                 **kwargs):
     """
-    Train GloVe vectors on the given `cooccurrence_list`, where each
-    element is of the form
+    Train GloVe vectors on the given generator `cooccurrences`, where
+    each element is of the form
 
         (word_i_id, word_j_id, x_ij)
 
@@ -307,12 +294,28 @@ def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
     # Sum of squared gradients for the bias terms.
     gradient_squared_biases = np.ones(vocab_size * 2, dtype=np.float64)
 
+    # Build a reusable list from the given cooccurrence generator,
+    # pre-fetching all necessary data.
+    #
+    # NB: These are all views into the actual data matrices, so updates
+    # to them will pass on to the real data structures
+    #
+    # (We even extract the single-element biases as slices so that we
+    # can use them as views)
+    data = [(W[i_main], W[i_context + vocab_size],
+             biases[i_main : i_main + 1],
+             biases[i_context + vocab_size : i_context + vocab_size + 1],
+             gradient_squared[i_main], gradient_squared[i_context + vocab_size],
+             gradient_squared_biases[i_main : i_main + 1],
+             gradient_squared_biases[i_context + vocab_size
+                                     : i_context + vocab_size + 1],
+             cooccurrence)
+            for i_main, i_context, cooccurrence in cooccurrences]
+
     for i in range(iterations):
         logger.info("\tBeginning iteration %i..", i)
 
-        cost, W, biases, gradient_squared, gradient_squared_biases = (
-            run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
-                     gradient_squared_biases))
+        cost = run_iter(word_ids, data, **kwargs)
 
         logger.info("\t\tDone (cost %f)", cost)
 
@@ -334,10 +337,8 @@ def main(arguments):
     logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
                 cooccurrences.getnnz())
 
-    cooccurrence_list = list(iter_cooccurrences(cooccurrences))
-
     logger.info("Beginning GloVe training..")
-    W = train_glove(word_ids, cooccurrence_list,
+    W = train_glove(word_ids, iter_cooccurrences(cooccurrences),
                     vector_size=arguments.vector_size,
                     iterations=arguments.iterations,
                     learning_rate=arguments.learning_rate)
