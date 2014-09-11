@@ -211,24 +211,24 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
         # main-word vector)
         context_word = W[context_word_shifted]
 
-        # Compute unweighted cost
-        #
-        #   $$ J' = w_i^Tw_j + b_i + b_j - log(X_{ij}) $$
-        cost = (main_word.dot(context_word) + biases[main_word_id]
-                + biases[context_word_shifted] - log(cooccurrence))
-
         weight = (cooccurrence / x_max) ** alpha if cooccurrence < x_max else 1
 
+        # Compute cost
+        #
+        #   $$ J' = w_i^Tw_j + b_i + b_j - log(X_{ij}) $$
+        cost = weight * (main_word.dot(context_word) + biases[main_word_id]
+                         + biases[context_word_shifted] - log(cooccurrence))
+
         # Add weighted cost to the global cost tracker
-        global_cost += 0.5 * weight * (cost ** 2)
+        global_cost += 0.5 * (cost ** 2)
 
         # Compute gradients for word vector elements.
         #
         # NB: `main_word` is only a view into `W` (not a copy), so our
         # modifications here will affect the global weight matrix;
         # likewise for context_word
-        grad_main = weight * cost * context_word
-        grad_context = weight * cost * main_word
+        grad_main = cost * context_word
+        grad_context = cost * main_word
 
         # Now perform adaptive updates
         main_word -= (learning_rate * grad_main / np.sqrt(
@@ -241,8 +241,8 @@ def run_iter(word_ids, cooccurrence_list, W, biases, gradient_squared,
         gradient_squared[context_word_shifted] += np.square(grad_context)
 
         # Compute gradients for bias terms
-        grad_bias_main = weight * cost
-        grad_bias_context = weight * cost
+        grad_bias_main = cost
+        grad_bias_context = cost
 
         biases[main_word_id] -= (learning_rate * grad_bias_main / np.sqrt(
             gradient_squared_biases[main_word_id]))
