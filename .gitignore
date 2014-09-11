@@ -1,0 +1,10 @@
+*.pyc
+.ipynb_checkpoints
+
+# virtualenv
+.Python
+bin
+include
+lib
+man
+share
