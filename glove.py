@@ -287,11 +287,11 @@ def train_glove(word_ids, cooccurrence_list, vector_size=100, iterations=25,
     # It is up to the client to decide what to do with the resulting two
     # vectors. Pennington et al. (2014) suggest adding or averaging the
     # two for each word, or discarding the context vectors.
-    W = np.random.randn(vocab_size * 2, vector_size) - 0.5
+    W = (np.random.rand(vocab_size * 2, vector_size) - 0.5) / float(vector_size + 1)
 
     # Bias terms, each associated with a single vector. An array of size
     # $2V$, initialized randomly in the range (-0.5, 0.5].
-    biases = np.random.randn(vocab_size * 2) - 0.5
+    biases = (np.random.rand(vocab_size * 2) - 0.5) / float(vector_size + 1)
 
     # Training is done via adaptive gradient descent (AdaGrad). To make
     # this work we need to store the sum of squares of all previous
