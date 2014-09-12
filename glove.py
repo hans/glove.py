@@ -56,6 +56,11 @@ def parse_args():
                          help='Number of training iterations')
     g_glove.add_argument('--learning-rate', type=float, default=0.05,
                          help='Initial learning rate')
+    g_glove.add_argument('--min-count', type=int, default=10,
+                         help=('Discard cooccurrence pairs where at '
+                               'least one of the words occurs fewer '
+                               'than this many times in the training '
+                               'corpus'))
 
     return parser.parse_args()
 
@@ -145,12 +150,16 @@ def build_cooccur(vocab, corpus, window_size=10):
     return word_ids, cooccurrences
 
 
-def iter_cooccurrences(lil_matrix):
+def iter_cooccurrences(lil_matrix, vocab, id2word, min_count=None):
     """
     Yield `(w1, w2, x)` pairs from a LiL sparse matrix as produced by
     `build_cooccur`, where `w1` is a row index (word ID), `w2` is a
     column index (context word ID), and `x` is a cell value
     ($X_{w1, w2}$).
+
+    Only yield cooccurrence pairs where each associated word occurs at
+    least `min_count` times in the training corpus. If `min_count` is
+    `None`, all words are yielded.
     """
 
     # This function is built for LiL-format sparse matrices only
@@ -158,7 +167,13 @@ def iter_cooccurrences(lil_matrix):
 
     for i, (row, data) in enumerate(itertools.izip(lil_matrix.rows,
                                                    lil_matrix.data)):
+        if vocab[id2word[i]] < min_count:
+            continue
+
         for data_idx, j in enumerate(row):
+            if vocab[id2word[j]] < min_count:
+                continue
+
             yield i, j, data[data_idx]
 
 
@@ -339,7 +354,9 @@ def main(arguments):
     logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
                 cooccurrences.getnnz())
 
-    cooccurrences = iter_cooccurrences(cooccurrences)
+    id2word = dict((y, x) for x, y in word_ids.iteritems())
+    cooccurrences = iter_cooccurrences(cooccurrences, vocab, id2word,
+                                       min_count=arguments.min_count)
 
     logger.info("Beginning GloVe training..")
     W = train_glove(word_ids, cooccurrences,

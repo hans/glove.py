@@ -27,8 +27,9 @@ glove.logger.setLevel(logging.ERROR)
 vocab = glove.build_vocab(test_corpus)
 word2id, cooccur = glove.build_cooccur(vocab, test_corpus, window_size=10)
 id2word = evaluate.make_id2word(word2id)
-W = glove.train_glove(word2id, glove.iter_cooccurrences(cooccur),
-                      vector_size=10, iterations=500)
+
+cooccur = glove.iter_cooccurrences(cooccur, vocab, id2word, min_count=None)
+W = glove.train_glove(word2id, cooccur, vector_size=10, iterations=500)
 
 # Merge and normalize word vectors
 W = evaluate.merge_main_context(W)
