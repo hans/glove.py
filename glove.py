@@ -167,7 +167,8 @@ class GloVe(object):
     Wrapper for performing GloVe training.
     """
 
-    def __init__(self, word_ids, cooccurrence_list, vector_size=100):
+    def __init__(self, word_ids, cooccurrence_list, vector_size=100,
+                 learning_rate=0.05):
         """
         Prepare to train GloVe vectors on the given `cooccurrence_list`,
         where each element is of the form
@@ -192,6 +193,16 @@ class GloVe(object):
         self.vocab_size = len(word_ids)
         self.vector_size = vector_size
 
+        self.learning_rate = learning_rate
+
+        self._init_params()
+        self._build_train()
+
+    def _init_params(self):
+        """
+        Initialize the parameters of the model.
+        """
+
         # Word vector matrix. This matrix is (2V) * d, where N is the
         # size of the corpus vocabulary and d is the dimensionality of
         # the word vectors. All elements are initialized randomly in the
@@ -203,7 +214,7 @@ class GloVe(object):
         # two vectors. Pennington et al. (2014) suggest adding or
         # averaging the two for each word, or discarding the context
         # vectors.
-        W_ = np.random.randn(self.vocab_size * 2, vector_size) - 0.5
+        W_ = np.random.randn(self.vocab_size * 2, self.vector_size) - 0.5
         self.W = theano.shared(W_.astype(theano.config.floatX), name='W')
 
         # Bias terms, each associated with a single vector. An array of
@@ -219,7 +230,7 @@ class GloVe(object):
         #
         # Initialize all squared gradient sums to 1 so that our initial
         # adaptive learning rate is simply the global learning rate.
-        gradsq_W_ = np.ones((self.vocab_size * 2, vector_size))
+        gradsq_W_ = np.ones((self.vocab_size * 2, self.vector_size))
         self.gradsq_W = theano.shared(gradsq_W_.astype(theano.config.floatX),
                                       name='gradsq_W')
 
@@ -227,6 +238,43 @@ class GloVe(object):
         gradsq_b_ = np.ones(self.vocab_size * 2)
         self.gradsq_b = theano.shared(gradsq_b_.astype(theano.config.floatX),
                                       name='gradsq_b')
+
+    def _build_train(self):
+        """
+        Compile the Theano-powered training routine. Creates a new
+        instance method `_train` to be used internally.
+        """
+
+        i_main = T.lscalar('i_main')
+        i_context = T.lscalar('i_context')
+
+        # Create symbolic variables for cost function parameters. Store
+        # these as class members so that our gradient method can also
+        # access them.
+        self.v_main, self.v_context = self.W[i_main], self.W[i_context]
+        self.b_main, self.b_context = (self.b[i_main:i_main + 1],
+                                       self.b[i_context:i_context + 1])
+        self.gradsq_W_main, self.gradsq_W_context = (self.gradsq_W[i_main],
+                                                     self.gradsq_W[i_context])
+        self.gradsq_b_main, self.gradsq_b_context = (self.gradsq_b[i_main:i_main + 1],
+                                                     self.gradsq_b[i_context:i_context + 1])
+
+        cooccurrence = T.dscalar('cooccurrence')
+
+        # Cost function: we want to enforce the equality
+        #
+        #     dot(w_i, w^'_j) + b_i + b_j = X_{ij}
+        #
+        # See the Pennington et al. paper for details.
+        cost = (T.dot(self.v_main, self.v_context)
+                + self.b_main[0] + self.b_context[0]
+                - T.log(cooccurrence))
+
+        self._train = theano.function(
+            [i_main, i_context, cooccurrence],
+            cost,
+            updates=self._gradient_updates(cost, self.learning_rate),
+            on_unused_input='warn')
 
     def train(self, iterations=25, **kwargs):
         """
@@ -240,7 +288,7 @@ class GloVe(object):
             cost = self.run_iter(**kwargs)
             logger.info("\t\tDone (cost %f)", cost)
 
-    def run_iter(self, learning_rate=0.05, x_max=100, alpha=0.75):
+    def run_iter(self, x_max=100, alpha=0.75):
         """
         Run a single iteration of GloVe training using the given
         cooccurrence data and the previously computed weight vectors /
@@ -256,28 +304,6 @@ class GloVe(object):
 
         global_cost = 0.
 
-        i_main = T.lscalar('i_main')
-        i_context = T.lscalar('i_context')
-
-        self.v_main, self.v_context = self.W[i_main], self.W[i_context]
-        self.b_main, self.b_context = self.b[i_main:i_main + 1], self.b[i_context:i_context + 1]
-        self.gradsq_W_main, self.gradsq_W_context = self.gradsq_W[i_main], self.gradsq_W[i_context]
-        self.gradsq_b_main, self.gradsq_b_context = (self.gradsq_b[i_main:i_main + 1],
-                                                     self.gradsq_b[i_context:i_context + 1])
-
-        cooccurrence = T.dscalar('cooccurrence')
-
-        # Cost function
-        cost = (T.dot(self.v_main, self.v_context)
-                + self.b_main[0] + self.b_context[0]
-                - T.log(cooccurrence))
-
-        train = theano.function([i_main, i_context, cooccurrence],
-                                cost,
-                                updates=self.gradient_updates(cost,
-                                                              learning_rate),
-                                on_unused_input='warn')
-
         # Run online AdaGrad learning
         for i_main, i_context, cooccurrence in self.cooccurrence_list:
             # Shift context word ID so that we fetch a different vector
@@ -285,11 +311,11 @@ class GloVe(object):
             # context
             i_context += self.vocab_size
 
-            global_cost += train(i_main, i_context, cooccurrence)
+            global_cost += self._train(i_main, i_context, cooccurrence)
 
         return global_cost
 
-    def gradient_updates(self, cost, learning_rate):
+    def _gradient_updates(self, cost, learning_rate):
         """
         Compute gradient updates for adaptive gradient descent on a
         single example.
@@ -356,9 +382,9 @@ def main(arguments):
 
     logger.info("Beginning GloVe training..")
     glove = GloVe(word_ids, cooccurrence_list,
-                  vector_size=arguments.vector_size)
-    glove.train(iterations=arguments.iterations,
-                learning_rate=arguments.learning_rate)
+                  vector_size=arguments.vector_size,
+                  learning_rate=arguments.learning_rate)
+    glove.train(iterations=arguments.iterations)
 
     # Model data to be saved
     model = (word_ids, glove.W)
