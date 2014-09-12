@@ -239,6 +239,14 @@ class GloVe(object):
         self.gradsq_b = theano.shared(gradsq_b_.astype(theano.config.floatX),
                                       name='gradsq_b')
 
+    @property
+    def vectors(self):
+        """
+        Retrieve the word vector matrix of the model.
+        """
+
+        return self.W.get_value()
+
     def _build_train(self):
         """
         Compile the Theano-powered training routine. Creates a new

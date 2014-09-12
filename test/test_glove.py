@@ -27,11 +27,13 @@ glove.logger.setLevel(logging.ERROR)
 vocab = glove.build_vocab(test_corpus)
 word2id, cooccur = glove.build_cooccur(vocab, test_corpus, window_size=10)
 id2word = evaluate.make_id2word(word2id)
-W = glove.train_glove(word2id, glove.iter_cooccurrences(cooccur),
-                      vector_size=10, iterations=700)
+
+glove_instance = glove.GloVe(word2id, list(glove.iter_cooccurrences(cooccur)),
+                             vector_size=10)
+glove_instance.train(iterations=700)
 
 # Merge and normalize word vectors
-W = evaluate.merge_main_context(W)
+W = evaluate.merge_main_context(glove_instance.vectors)
 
 
 def test_similarity():
