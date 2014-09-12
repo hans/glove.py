@@ -209,12 +209,12 @@ def run_iter(word_ids, data,
 
         # Compute cost
         #
-        #   $$ J' = w_i^Tw_j + b_i + b_j - log(X_{ij}) $$
-        cost = weight * (v_main.dot(v_context) + b_main[0] + b_context[0]
-                         - log(cooccurrence))
+        #   $$ J' = f(X_{ij}) (w_i^Tw_j + b_i + b_j - log(X_{ij}))^2 $$
+        cost = weight * ((v_main.dot(v_context) + b_main[0] + b_context[0]
+                          - log(cooccurrence)) ** 2)
 
         # Add weighted cost to the global cost tracker
-        global_cost += 0.5 * (cost ** 2)
+        global_cost += 0.5 * cost
 
         # Compute gradients for word vector elements.
         #
