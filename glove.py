@@ -17,8 +17,7 @@ from scipy import sparse
 from util import listify
 
 
-logging.basicConfig()
-logger = logging.getLogger('glove')
+logger = logging.getLogger("glove")
 
 
 def parse_args():
@@ -378,5 +377,6 @@ def main(arguments):
 
 
 if __name__ == '__main__':
-    logger.setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG,
+                        format="%(asctime)s\t%(message)s")
     main(parse_args())
