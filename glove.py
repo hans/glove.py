@@ -291,12 +291,24 @@ class GloVe(object):
         cost = weight * (T.dot(self.v_main, self.v_context)
                          + self.b_main[0] + self.b_context[0]
                          - T.log(cooccurrence))
+        self._build_gradients(cost)
 
-        self._train = theano.function(
-            [i_main, i_context, cooccurrence],
-            cost,
-            updates=self._gradient_updates(cost, self.learning_rate),
-            on_unused_input='warn')
+        self._train = theano.function([i_main, i_context, cooccurrence],
+                                      cost,
+                                      updates=self._gradient_updates(),
+                                      on_unused_input='warn')
+
+    def _build_gradients(self, cost):
+        """
+        Compute the partial derivatives of the cost function with
+        respect to the variables we control in this model.
+        """
+
+        self.grad_v_main = T.grad(cost, self.v_main)
+        self.grad_v_context = T.grad(cost, self.v_context)
+
+        self.grad_b_main = T.grad(cost, self.b_main)
+        self.grad_b_context = T.grad(cost, self.b_context)
 
     def train(self, iterations=25):
         """
@@ -333,7 +345,7 @@ class GloVe(object):
 
         return global_cost
 
-    def _gradient_updates(self, cost, learning_rate):
+    def _gradient_updates(self):
         """
         Compute gradient updates for adaptive gradient descent on a
         single example.
@@ -344,38 +356,34 @@ class GloVe(object):
 
         updates = []
 
-        # Compute gradients for word vector elements.
-        grad_main = T.grad(cost, wrt=self.v_main)
-        grad_context = T.grad(cost, wrt=self.v_context)
-
-        # Compute gradients for bias terms
-        grad_b_main = T.grad(cost, self.b_main)
-        grad_b_context = T.grad(cost, self.b_context)
-
         # Now perform adaptive updates
         W_ = T.inc_subtensor(self.v_main,
-                             (-learning_rate * grad_main
+                             (-self.learning_rate * self.grad_v_main
                               / T.sqrt(self.gradsq_W_main)))
         W_ = T.inc_subtensor(self.v_context,
-                             (-learning_rate * grad_context
+                             (-self.learning_rate * self.grad_v_context
                               / T.sqrt(self.gradsq_W_context)))
         updates.append((self.W, W_))
 
         b_ = T.inc_subtensor(self.b_main,
-                             (-learning_rate * grad_b_main
+                             (-self.learning_rate * self.grad_b_main
                               / T.sqrt(self.gradsq_b_main)))
         b_ = T.inc_subtensor(self.b_context,
-                             (-learning_rate * grad_b_context
+                             (-self.learning_rate * self.grad_b_context
                               / T.sqrt(self.gradsq_b_context)))
         updates.append((self.b, b_))
 
         # Update squared gradient sums
-        gradsq_W_ = T.inc_subtensor(self.gradsq_W_main, grad_main ** 2)
-        gradsq_W_ = T.inc_subtensor(self.gradsq_W_context, grad_context ** 2)
+        gradsq_W_ = T.inc_subtensor(self.gradsq_W_main,
+                                    self.grad_v_main ** 2)
+        gradsq_W_ = T.inc_subtensor(self.gradsq_W_context,
+                                    self.grad_v_context ** 2)
         updates.append((self.gradsq_W, gradsq_W_))
 
-        gradsq_b_ = T.inc_subtensor(self.gradsq_b_main, grad_b_main ** 2)
-        gradsq_b_ = T.inc_subtensor(self.gradsq_b_context, grad_b_context ** 2)
+        gradsq_b_ = T.inc_subtensor(self.gradsq_b_main,
+                                    self.grad_b_main ** 2)
+        gradsq_b_ = T.inc_subtensor(self.gradsq_b_context,
+                                    self.grad_b_context ** 2)
         updates.append((self.gradsq_b, gradsq_b_))
 
         return updates
