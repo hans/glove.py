@@ -337,8 +337,10 @@ def main(arguments):
     logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
                 cooccurrences.getnnz())
 
+    cooccurrences = iter_cooccurrences(cooccurrences)
+
     logger.info("Beginning GloVe training..")
-    W = train_glove(word_ids, iter_cooccurrences(cooccurrences),
+    W = train_glove(word_ids, cooccurrences,
                     vector_size=arguments.vector_size,
                     iterations=arguments.iterations,
                     learning_rate=arguments.learning_rate)
