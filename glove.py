@@ -168,7 +168,7 @@ class GloVe(object):
     """
 
     def __init__(self, word_ids, cooccurrence_list, vector_size=100,
-                 learning_rate=0.05):
+                 learning_rate=0.05, x_max=100, alpha=0.75):
         """
         Prepare to train GloVe vectors on the given `cooccurrence_list`,
         where each element is of the form
@@ -180,6 +180,10 @@ class GloVe(object):
         (2014) paper itself.
 
         `word_ids` should be provided as returned by `build_cooccur`.
+
+        The parameters `x_max`, `alpha` define our weighting function
+        when computing the cost for two word pairs; see the GloVe paper
+        for more details.
         """
 
         self.word_ids = word_ids
@@ -194,6 +198,8 @@ class GloVe(object):
         self.vector_size = vector_size
 
         self.learning_rate = learning_rate
+        self.x_max = x_max
+        self.alpha = alpha
 
         self._init_params()
         self._build_train()
@@ -272,14 +278,19 @@ class GloVe(object):
 
         cooccurrence = T.dscalar('cooccurrence')
 
+        # Frequency-based weight
+        weight =  T.switch(T.lt(cooccurrence, self.x_max),
+                           (cooccurrence / self.x_max) ** self.alpha,
+                           1)
+
         # Cost function: we want to enforce the equality
         #
         #     dot(w_i, w^'_j) + b_i + b_j = X_{ij}
         #
         # See the Pennington et al. paper for details.
-        cost = (T.dot(self.v_main, self.v_context)
-                + self.b_main[0] + self.b_context[0]
-                - T.log(cooccurrence))
+        cost = weight * (T.dot(self.v_main, self.v_context)
+                         + self.b_main[0] + self.b_context[0]
+                         - T.log(cooccurrence))
 
         self._train = theano.function(
             [i_main, i_context, cooccurrence],
@@ -287,7 +298,7 @@ class GloVe(object):
             updates=self._gradient_updates(cost, self.learning_rate),
             on_unused_input='warn')
 
-    def train(self, iterations=25, **kwargs):
+    def train(self, iterations=25):
         """
         Train GloVe vectors with the given cooccurrence data.
 
@@ -296,18 +307,14 @@ class GloVe(object):
 
         for i in range(iterations):
             logger.info("\tBeginning iteration %i..", i)
-            cost = self.run_iter(**kwargs)
+            cost = self.run_iter()
             logger.info("\t\tDone (cost %f)", cost)
 
-    def run_iter(self, x_max=100, alpha=0.75):
+    def run_iter(self):
         """
         Run a single iteration of GloVe training using the given
         cooccurrence data and the previously computed weight vectors /
         biases and accompanying gradient histories.
-
-        The parameters `x_max`, `alpha` define our weighting function
-        when computing the cost for two word pairs; see the GloVe paper
-        for more details.
 
         Returns the feedforward cost associated with the given inputs
         and updates the weights by SGD in place.
