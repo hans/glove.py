@@ -206,20 +206,23 @@ class GloVe(object):
         # Word vector matrix. This matrix is (2V) * d, where N is the
         # size of the corpus vocabulary and d is the dimensionality of
         # the word vectors. All elements are initialized randomly in the
-        # range (-0.5, 0.5]. We build two word vectors for each word:
-        # one for the word as the main (center) word and one for the
-        # word as a context word.
+        # range (-0.5 / d, 0.5 / d]. We build two word vectors for each
+        # word: one for the word as the main (center) word and one for
+        # the word as a context word.
         #
         # It is up to the client to decide what to do with the resulting
         # two vectors. Pennington et al. (2014) suggest adding or
         # averaging the two for each word, or discarding the context
         # vectors.
-        W_ = np.random.randn(self.vocab_size * 2, self.vector_size) - 0.5
+        W_ = ((np.random.rand(self.vocab_size * 2, self.vector_size) - 0.5)
+              / float(self.vector_size))
         self.W = theano.shared(W_.astype(theano.config.floatX), name='W')
 
         # Bias terms, each associated with a single vector. An array of
-        # size $2V$, initialized randomly in the range (-0.5, 0.5].
-        b_ = np.random.randn(self.vocab_size * 2) - 0.5
+        # size $2V$, initialized randomly in the range (-0.5 / d, 0.5 /
+        # d].
+        b_ = ((np.random.rand(self.vocab_size * 2) - 0.5)
+              / float(self.vector_size))
         self.b = theano.shared(b_.astype(theano.config.floatX), name = 'b')
 
         # Training is done via adaptive gradient descent (AdaGrad). To
