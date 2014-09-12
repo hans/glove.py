@@ -222,11 +222,18 @@ def run_iter(word_ids, data,
 
         weight = (cooccurrence / x_max) ** alpha if cooccurrence < x_max else 1
 
+        # Compute inner component of cost function, which is used in
+        # both overall cost calculation and in gradient calculation
+        #
+        #   $$ J' = w_i^Tw_j + b_i + b_j - log(X_{ij}) $$
+        cost_inner = (v_main.dot(v_context)
+                      + b_main[0] + b_context[0]
+                      - log(cooccurrence))
+
         # Compute cost
         #
-        #   $$ J' = f(X_{ij}) (w_i^Tw_j + b_i + b_j - log(X_{ij}))^2 $$
-        cost = weight * ((v_main.dot(v_context) + b_main[0] + b_context[0]
-                          - log(cooccurrence)) ** 2)
+        #   $$ J = f(X_{ij}) (J')^2 $$
+        cost = weight * (cost_inner ** 2)
 
         # Add weighted cost to the global cost tracker
         global_cost += 0.5 * cost
@@ -236,8 +243,8 @@ def run_iter(word_ids, data,
         # NB: `main_word` is only a view into `W` (not a copy), so our
         # modifications here will affect the global weight matrix;
         # likewise for context_word
-        grad_main = cost * v_context
-        grad_context = cost * v_main
+        grad_main = cost_inner * v_context
+        grad_context = cost_inner * v_main
 
         # Now perform adaptive updates
         v_main -= (learning_rate * grad_main / np.sqrt(gradsq_W_main))
@@ -248,8 +255,8 @@ def run_iter(word_ids, data,
         gradsq_W_context += np.square(grad_context)
 
         # Compute gradients for bias terms
-        grad_bias_main = cost
-        grad_bias_context = cost
+        grad_bias_main = cost_inner
+        grad_bias_context = cost_inner
 
         b_main -= (learning_rate * grad_bias_main / np.sqrt(gradsq_b_main))
         b_context -= (learning_rate * grad_bias_context / np.sqrt(
