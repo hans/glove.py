@@ -62,6 +62,9 @@ def parse_args():
                          help='Number of training iterations')
     g_glove.add_argument('--learning-rate', type=float, default=0.05,
                          help='Initial learning rate')
+    g_glove.add_argument('--save-often', action='store_true', default=False,
+                         help=('Save vectors after every training '
+                               'iteration'))
 
     return parser.parse_args()
 
@@ -178,14 +181,11 @@ def build_cooccur(vocab, corpus, window_size=10, min_count=None):
             yield i, j, data[data_idx]
 
 
-def run_iter(word_ids, data,
-             learning_rate=0.05, x_max=100, alpha=0.75):
+def run_iter(vocab, data, learning_rate=0.05, x_max=100, alpha=0.75):
     """
     Run a single iteration of GloVe training using the given
     cooccurrence data and the previously computed weight vectors /
     biases and accompanying gradient histories.
-
-    `word_ids` should be provided as returned by `build_cooccur`.
 
     `data` is a pre-fetched data / weights list where each element is of
     the form
@@ -270,8 +270,8 @@ def run_iter(word_ids, data,
     return global_cost
 
 
-def train_glove(word_ids, cooccurrences, vector_size=100, iterations=25,
-                **kwargs):
+def train_glove(vocab, cooccurrences, iter_callback=None, vector_size=100,
+                iterations=25, **kwargs):
     """
     Train GloVe vectors on the given generator `cooccurrences`, where
     each element is of the form
@@ -282,13 +282,16 @@ def train_glove(word_ids, cooccurrences, vector_size=100, iterations=25,
     matrix defined by `build_cooccur` and the Pennington et al. (2014)
     paper itself.
 
+    If `iter_callback` is not `None`, the provided function will be
+    called after each iteration with the learned `W` matrix so far.
+
     Keyword arguments are passed on to the iteration step function
     `run_iter`.
 
     Returns the computed word vector matrix `W`.
     """
 
-    vocab_size = len(word_ids)
+    vocab_size = len(vocab)
 
     # Word vector matrix. This matrix is (2V) * d, where N is the size
     # of the corpus vocabulary and d is the dimensionality of the word
@@ -340,11 +343,21 @@ def train_glove(word_ids, cooccurrences, vector_size=100, iterations=25,
     for i in range(iterations):
         logger.info("\tBeginning iteration %i..", i)
 
-        cost = run_iter(word_ids, data, **kwargs)
+        cost = run_iter(vocab, data, **kwargs)
 
         logger.info("\t\tDone (cost %f)", cost)
 
+        if iter_callback is not None:
+            iter_callback(W)
+
     return W
+
+
+def save_model(W, path):
+    with open(path, 'wb') as vector_f:
+        pickle.dump(W, vector_f)
+
+    logger.info("Saved vectors to %s", path)
 
 
 def main(arguments):
@@ -363,17 +376,20 @@ def main(arguments):
     logger.info("Cooccurrence list fetch complete (%i pairs).\n",
                 len(cooccurrences))
 
+    if arguments.save_often:
+        iter_callback = partial(save_model, path=arguments.vector_path)
+    else:
+        iter_callback = None
+
     logger.info("Beginning GloVe training..")
     W = train_glove(vocab, cooccurrences,
+                    iter_callback=iter_callback,
                     vector_size=arguments.vector_size,
                     iterations=arguments.iterations,
                     learning_rate=arguments.learning_rate)
 
     # TODO shave off bias values, do something with context vectors
-    with open(arguments.vector_path, 'wb') as vector_f:
-        pickle.dump(W, vector_f)
-
-    logger.info("Saved vectors to %s", arguments.vector_path)
+    save_model(W, arguments.vector_path)
 
 
 if __name__ == '__main__':
