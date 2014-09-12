@@ -5,8 +5,8 @@ import cPickle as pickle
 import numpy as np
 
 
-def make_id2word(word2id):
-    return dict((y, x) for x, y in word2id.iteritems())
+def make_id2word(vocab):
+    return dict((id, word) for word, (id, _) in vocab.iteritems())
 
 
 def merge_main_context(W, merge_fun=lambda m, c: np.mean([m, c], axis=0),
@@ -29,7 +29,7 @@ def merge_main_context(W, merge_fun=lambda m, c: np.mean([m, c], axis=0),
     return W[:vocab_size]
 
 
-def most_similar(W, word2id, id2word, word, n=15):
+def most_similar(W, vocab, id2word, word, n=15):
     """
     Find the `n` words most similar to the given `word`. The provided
     `W` must have unit vector rows, and must have merged main- and
@@ -38,9 +38,9 @@ def most_similar(W, word2id, id2word, word, n=15):
     Returns a list of word strings.
     """
 
-    assert len(W) == len(word2id)
+    assert len(W) == len(vocab)
 
-    word_id = word2id[word]
+    word_id = vocab[word][0]
 
     dists = np.dot(W, W[word_id])
     top_ids = np.argsort(dists)[::-1][:n + 1]

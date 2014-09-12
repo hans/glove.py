@@ -25,19 +25,17 @@ Sometimes I build trees""").split("\n")
 
 glove.logger.setLevel(logging.ERROR)
 vocab = glove.build_vocab(test_corpus)
-word2id, cooccur = glove.build_cooccur(vocab, test_corpus, window_size=10)
-id2word = evaluate.make_id2word(word2id)
+cooccur = glove.build_cooccur(vocab, test_corpus, window_size=10)
+id2word = evaluate.make_id2word(vocab)
 
-cooccur = glove.iter_cooccurrences(cooccur, vocab, id2word, min_count=None)
-W = glove.train_glove(word2id, cooccur, vector_size=10, iterations=500)
+W = glove.train_glove(vocab, cooccur, vector_size=10, iterations=500)
 
 # Merge and normalize word vectors
 W = evaluate.merge_main_context(W)
 
 
 def test_similarity():
-    # for x, y, c in glove.iter_cooccurrences(cooccur):
-    #     print id2word[x], id2word[y], c
-    similar = evaluate.most_similar(W, word2id, id2word, 'graph')
-    print similar
+    similar = evaluate.most_similar(W, vocab, id2word, 'graph')
+    logging.debug(similar)
+
     assert_equal('trees', similar[0])
