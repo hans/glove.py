@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from argparse import ArgumentParser
 import codecs
 from collections import Counter
@@ -404,10 +406,10 @@ def main(arguments):
     logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
                 cooccurrences.getnnz())
 
-    cooccurrence_list = list(iter_cooccurrences(cooccurrences))
+    cooccurrences = list(iter_cooccurrences(cooccurrences))
 
     logger.info("Beginning GloVe training..")
-    glove = GloVe(word_ids, cooccurrence_list,
+    glove = GloVe(word_ids, cooccurrences,
                   vector_size=arguments.vector_size,
                   learning_rate=arguments.learning_rate)
     glove.train(iterations=arguments.iterations)
