@@ -304,6 +304,10 @@ class GloVe(object):
         grad_main = T.grad(cost, wrt=self.v_main)
         grad_context = T.grad(cost, wrt=self.v_context)
 
+        # Compute gradients for bias terms
+        grad_b_main = T.grad(cost, self.b_main)
+        grad_b_context = T.grad(cost, self.b_context)
+
         # Now perform adaptive updates
         W_ = T.inc_subtensor(self.v_main,
                              (-learning_rate * grad_main
@@ -312,15 +316,6 @@ class GloVe(object):
                              (-learning_rate * grad_context
                               / T.sqrt(self.gradsq_W_context)))
         updates.append((self.W, W_))
-
-        # Update squared gradient sums
-        gradsq_W_ = T.inc_subtensor(self.gradsq_W_main, grad_main ** 2)
-        gradsq_W_ = T.inc_subtensor(self.gradsq_W_context, grad_context ** 2)
-        updates.append((self.gradsq_W, gradsq_W_))
-
-        # Compute gradients for bias terms
-        grad_b_main = T.grad(cost, self.b_main)
-        grad_b_context = T.grad(cost, self.b_context)
 
         b_ = T.inc_subtensor(self.b_main,
                              (-learning_rate * grad_b_main
@@ -331,6 +326,10 @@ class GloVe(object):
         updates.append((self.b, b_))
 
         # Update squared gradient sums
+        gradsq_W_ = T.inc_subtensor(self.gradsq_W_main, grad_main ** 2)
+        gradsq_W_ = T.inc_subtensor(self.gradsq_W_context, grad_context ** 2)
+        updates.append((self.gradsq_W, gradsq_W_))
+
         gradsq_b_ = T.inc_subtensor(self.gradsq_b_main, grad_b_main ** 2)
         gradsq_b_ = T.inc_subtensor(self.gradsq_b_context, grad_b_context ** 2)
         updates.append((self.gradsq_b, gradsq_b_))
