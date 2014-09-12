@@ -239,31 +239,29 @@ def run_iter(vocab, data, learning_rate=0.05, x_max=100, alpha=0.75):
         # Add weighted cost to the global cost tracker
         global_cost += 0.5 * cost
 
-        # Compute gradients for word vector elements.
+        # Compute gradients for word vector terms.
         #
         # NB: `main_word` is only a view into `W` (not a copy), so our
         # modifications here will affect the global weight matrix;
-        # likewise for context_word
+        # likewise for context_word, biases, etc.
         grad_main = cost_inner * v_context
         grad_context = cost_inner * v_main
-
-        # Now perform adaptive updates
-        v_main -= (learning_rate * grad_main / np.sqrt(gradsq_W_main))
-        v_context -= (learning_rate * grad_context / np.sqrt(gradsq_W_context))
-
-        # Update squared gradient sums
-        gradsq_W_main += np.square(grad_main)
-        gradsq_W_context += np.square(grad_context)
 
         # Compute gradients for bias terms
         grad_bias_main = cost_inner
         grad_bias_context = cost_inner
+
+        # Now perform adaptive updates
+        v_main -= (learning_rate * grad_main / np.sqrt(gradsq_W_main))
+        v_context -= (learning_rate * grad_context / np.sqrt(gradsq_W_context))
 
         b_main -= (learning_rate * grad_bias_main / np.sqrt(gradsq_b_main))
         b_context -= (learning_rate * grad_bias_context / np.sqrt(
                 gradsq_b_context))
 
         # Update squared gradient sums
+        gradsq_W_main += np.square(grad_main)
+        gradsq_W_context += np.square(grad_context)
         gradsq_b_main += grad_bias_main ** 2
         gradsq_b_context += grad_bias_context ** 2
 
