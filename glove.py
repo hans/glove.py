@@ -46,6 +46,11 @@ def parse_args():
     g_cooccur.add_argument('-w', '--window-size', type=int, default=10,
                            help=('Number of context words to track to '
                                  'left and right of each word'))
+    g_cooccur.add_argument('--min-count', type=int, default=10,
+                           help=('Discard cooccurrence pairs where at '
+                                 'least one of the words occurs fewer '
+                                 'than this many times in the training '
+                                 'corpus'))
 
     g_glove = parser.add_argument_group('GloVe options')
     g_glove.add_argument('--vector-path',
@@ -57,11 +62,6 @@ def parse_args():
                          help='Number of training iterations')
     g_glove.add_argument('--learning-rate', type=float, default=0.05,
                          help='Initial learning rate')
-    g_glove.add_argument('--min-count', type=int, default=10,
-                         help=('Discard cooccurrence pairs where at '
-                               'least one of the words occurs fewer '
-                               'than this many times in the training '
-                               'corpus'))
 
     return parser.parse_args()
 
