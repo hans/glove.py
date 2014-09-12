@@ -14,6 +14,8 @@ from random import shuffle
 import numpy as np
 from scipy import sparse
 
+from util import listify
+
 
 logging.basicConfig()
 logger = logging.getLogger('glove')
@@ -95,6 +97,9 @@ def get_or_build(path, build_fn, *args, **kwargs):
 def build_vocab(corpus):
     """
     Build a vocabulary with word frequencies for an entire corpus.
+
+    Returns a dictionary `w -> (i, f)`, mapping word strings to pairs of
+    word ID and word corpus frequency.
     """
 
     logger.info("Building vocab from corpus")
@@ -106,20 +111,33 @@ def build_vocab(corpus):
 
     logger.info("Done building vocab from corpus.")
 
-    return vocab
+    return {word: (i, freq) for i, (word, freq) in enumerate(vocab.iteritems())}
 
 
-def build_cooccur(vocab, corpus, window_size=10):
+@listify
+def build_cooccur(vocab, corpus, window_size=10, min_count=None):
     """
-    Build a word co-occurrence matrix for the given corpus.
+    Build a word co-occurrence list for the given corpus.
 
-    Returns a pair `(word_ids, cooccurrences)`, where `word_ids` is a
-    dictionary mapping from word string to unique integer ID, and
-    `cooccurrences` is the computed co-occurrence matrix.
+    This function is a tuple generator, where each element (representing
+    a cooccurrence pair) is of the form
+
+        (i_main, i_context, cooccurrence)
+
+    where `i_main` is the ID of the main word in the cooccurrence and
+    `i_context` is the ID of the context word, and `cooccurrence` is the
+    `X_{ij}` cooccurrence value as described in Pennington et al.
+    (2014).
+
+    If `min_count` is not `None`, cooccurrence pairs where either word
+    occurs in the corpus fewer than `min_count` times are ignored.
     """
 
     vocab_size = len(vocab)
-    word_ids = {word: id for id, word in enumerate(vocab.iterkeys())}
+    id2word = dict((i, word) for word, (i, _) in vocab.iteritems())
+
+    # Collect cooccurrences internally as a sparse matrix for passable
+    # indexing speed; we'll convert into a list later
     cooccurrences = sparse.lil_matrix((vocab_size, vocab_size),
                                       dtype=np.float64)
 
@@ -128,7 +146,7 @@ def build_cooccur(vocab, corpus, window_size=10):
             logger.info("Building cooccurrence matrix: on line %i", i)
 
         tokens = line.strip().split()
-        token_ids = [word_ids[word] for word in tokens]
+        token_ids = [vocab[word][0] for word in tokens]
 
         for center_i, center_id in enumerate(token_ids):
             # Collect all word IDs in left window of center word
@@ -147,31 +165,15 @@ def build_cooccur(vocab, corpus, window_size=10):
                 cooccurrences[center_id, left_id] += increment
                 cooccurrences[left_id, center_id] += increment
 
-    return word_ids, cooccurrences
-
-
-def iter_cooccurrences(lil_matrix, vocab, id2word, min_count=None):
-    """
-    Yield `(w1, w2, x)` pairs from a LiL sparse matrix as produced by
-    `build_cooccur`, where `w1` is a row index (word ID), `w2` is a
-    column index (context word ID), and `x` is a cell value
-    ($X_{w1, w2}$).
-
-    Only yield cooccurrence pairs where each associated word occurs at
-    least `min_count` times in the training corpus. If `min_count` is
-    `None`, all words are yielded.
-    """
-
-    # This function is built for LiL-format sparse matrices only
-    assert isinstance(lil_matrix, sparse.lil_matrix)
-
-    for i, (row, data) in enumerate(itertools.izip(lil_matrix.rows,
-                                                   lil_matrix.data)):
-        if vocab[id2word[i]] < min_count:
+    # Now yield our tuple sequence (dig into the LiL-matrix internals to
+    # quickly iterate through all nonzero cells)
+    for i, (row, data) in enumerate(itertools.izip(cooccurrences.rows,
+                                                   cooccurrences.data)):
+        if min_count is not None and vocab[id2word[i]][0] < min_count:
             continue
 
         for data_idx, j in enumerate(row):
-            if vocab[id2word[j]] < min_count:
+            if min_count is not None and vocab[id2word[j]][0] < min_count:
                 continue
 
             yield i, j, data[data_idx]
@@ -353,30 +355,24 @@ def main(arguments):
     vocab = get_or_build(arguments.vocab_path, build_vocab, corpus)
     logger.info("Vocab has %i elements.\n", len(vocab))
 
-    logger.info("Fetching cooccurrence matrix..")
+    logger.info("Fetching cooccurrence list..")
     corpus.seek(0)
-    word_ids, cooccurrences = get_or_build(arguments.cooccur_path,
-                                           build_cooccur, vocab, corpus,
-                                           arguments.window_size)
-    logger.info("Cooccurrence matrix fetch complete; %i nonzero values.\n",
-                cooccurrences.getnnz())
-
-    id2word = dict((y, x) for x, y in word_ids.iteritems())
-    cooccurrences = iter_cooccurrences(cooccurrences, vocab, id2word,
-                                       min_count=arguments.min_count)
+    cooccurrences = get_or_build(arguments.cooccur_path,
+                                 build_cooccur, vocab, corpus,
+                                 window_size=arguments.window_size,
+                                 min_count=arguments.min_count)
+    logger.info("Cooccurrence list fetch complete (%i pairs).\n",
+                len(cooccurrences))
 
     logger.info("Beginning GloVe training..")
-    W = train_glove(word_ids, cooccurrences,
+    W = train_glove(vocab, cooccurrences,
                     vector_size=arguments.vector_size,
                     iterations=arguments.iterations,
                     learning_rate=arguments.learning_rate)
 
-    # Model data to be saved
-    model = (word_ids, W)
-
     # TODO shave off bias values, do something with context vectors
     with open(arguments.vector_path, 'wb') as vector_f:
-        pickle.dump(model, vector_f)
+        pickle.dump(W, vector_f)
 
     logger.info("Saved vectors to %s", arguments.vector_path)
 
