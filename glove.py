@@ -82,7 +82,7 @@ def get_or_build(path, build_fn, *args, **kwargs):
 
     if path is not None and os.path.isfile(path):
         with open(path, 'rb') as obj_f:
-            obj = msgpack.load(obj_f, use_list=False)
+            obj = msgpack.load(obj_f, use_list=False, encoding='utf-8')
     else:
         save = True
 
