@@ -8,9 +8,9 @@ from functools import partial
 import logging
 from math import log
 import os.path
-import pickle
 from random import shuffle
 
+import msgpack
 import numpy as np
 from scipy import sparse
 
@@ -82,7 +82,7 @@ def get_or_build(path, build_fn, *args, **kwargs):
 
     if path is not None and os.path.isfile(path):
         with open(path, 'rb') as obj_f:
-            obj = pickle.load(obj_f)
+            obj = msgpack.load(obj_f, use_list=False)
     else:
         save = True
 
@@ -91,7 +91,7 @@ def get_or_build(path, build_fn, *args, **kwargs):
 
         if save and path is not None:
             with open(path, 'wb') as obj_f:
-                pickle.dump(obj, obj_f)
+                msgpack.dump(obj, obj_f)
 
     return obj
 
