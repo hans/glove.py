@@ -8,6 +8,7 @@ from functools import partial
 import logging
 from math import log
 import os.path
+import cPickle as pickle
 from random import shuffle
 
 import msgpack
@@ -353,7 +354,7 @@ def train_glove(vocab, cooccurrences, iter_callback=None, vector_size=100,
 
 def save_model(W, path):
     with open(path, 'wb') as vector_f:
-        pickle.dump(W, vector_f)
+        pickle.dump(W, vector_f, protocol=2)
 
     logger.info("Saved vectors to %s", path)
 
