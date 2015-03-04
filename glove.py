@@ -245,12 +245,12 @@ def run_iter(vocab, data, learning_rate=0.05, x_max=100, alpha=0.75):
         # NB: `main_word` is only a view into `W` (not a copy), so our
         # modifications here will affect the global weight matrix;
         # likewise for context_word, biases, etc.
-        grad_main = cost_inner * v_context
-        grad_context = cost_inner * v_main
+        grad_main = weight * cost_inner * v_context
+        grad_context = weight * cost_inner * v_main
 
         # Compute gradients for bias terms
-        grad_bias_main = cost_inner
-        grad_bias_context = cost_inner
+        grad_bias_main = weight * cost_inner
+        grad_bias_context = weight * cost_inner
 
         # Now perform adaptive updates
         v_main -= (learning_rate * grad_main / np.sqrt(gradsq_W_main))
