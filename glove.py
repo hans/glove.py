@@ -172,11 +172,11 @@ def build_cooccur(vocab, corpus, window_size=10, min_count=None):
     # quickly iterate through all nonzero cells)
     for i, (row, data) in enumerate(itertools.izip(cooccurrences.rows,
                                                    cooccurrences.data)):
-        if min_count is not None and vocab[id2word[i]][0] < min_count:
+        if min_count is not None and vocab[id2word[i]][1] < min_count:
             continue
 
         for data_idx, j in enumerate(row):
-            if min_count is not None and vocab[id2word[j]][0] < min_count:
+            if min_count is not None and vocab[id2word[j]][1] < min_count:
                 continue
 
             yield i, j, data[data_idx]
